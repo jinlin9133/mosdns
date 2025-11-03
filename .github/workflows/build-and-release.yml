@@ -3,13 +3,13 @@ name: Build and Release mosdns
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 2 * * *"  # 每天凌晨 2 点自动构建
+    - cron: "0 2 * * *"  # 每天 UTC 2 点（北京时间 10 点）构建
   push:
     branches: [ master, main ]
 
 jobs:
   build:
-    name: Build binaries
+    name: Build and Release
     runs-on: ubuntu-latest
 
     steps:
@@ -21,6 +21,10 @@ jobs:
         with:
           go-version: "1.22"
 
+      - name: Get current date (YYYYMMDD)
+        id: get_date
+        run: echo "date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+
       - name: Build for macOS (arm64)
         run: |
           CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o mosdns-darwin-arm64
@@ -29,24 +33,27 @@ jobs:
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -extldflags '-static'" -o mosdns-linux-amd64
 
-      - name: Create Release
-        id: create_release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: nightly-${{ github.run_number }}
-          name: "Nightly Build ${{ github.run_number }}"
-          draft: false
-          prerelease: true
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create versioned archive files
+        run: |
+          DATE=${{ steps.get_date.outputs.date }}
+          # macOS
+          mkdir -p mosdns-darwin-arm64-${DATE}
+          cp mosdns-darwin-arm64 mosdns-darwin-arm64-${DATE}/
+          tar -czf mosdns-${DATE}-darwin-arm64.tar.gz mosdns-darwin-arm64-${DATE}
+          # Linux
+          mkdir -p mosdns-linux-amd64-${DATE}
+          cp mosdns-linux-amd64 mosdns-linux-amd64-${DATE}/
+          tar -czf mosdns-${DATE}-linux-amd64.tar.gz mosdns-linux-amd64-${DATE}
 
-      - name: Upload binaries to Release
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.get_date.outputs.date }}
+          name: "Release ${{ steps.get_date.outputs.date }}"
+          draft: false
+          prerelease: false  # ← 关键：改为正式发布！
           files: |
-            mosdns-darwin-arm64
-            mosdns-linux-amd64
-          tag_name: nightly-${{ github.run_number }}
+            mosdns-${{ steps.get_date.outputs.date }}-darwin-arm64.tar.gz
+            mosdns-${{ steps.get_date.outputs.date }}-linux-amd64.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
